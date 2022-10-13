@@ -17,7 +17,8 @@
     "lint": "vue-cli-service lint src example",
     "prepublishOnly": "npm run lint && npm run test:unit && npm run build:doc && npm run build",
     "test:unit": "vue-cli-service test:unit --coverage",
-    "test:coverage": "vue-cli-service test:unit --coverage --verbose && codecov"
+    "test:coverage": "vue-cli-service test:unit --coverage --verbose && codecov",
+    "prepare": "npm run lint && npm run test:unit && npm run build:doc && npm run build"
   },
   "keywords": [
     "vue",
