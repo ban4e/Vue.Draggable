@@ -1,5 +1,8 @@
 import Sortable from "sortablejs";
+import { Swap } from "sortablejs/modular/sortable.core.esm";
 import { insertNodeAt, camelize, console, removeNode } from "./util/helper";
+
+Sortable.mount(new Swap());
 
 function buildAttribute(object, propName, value) {
   if (value === undefined) {
@@ -143,6 +146,13 @@ const props = {
     type: Object,
     required: false,
     default: null
+  },
+  swap: {
+    type: Boolean,
+    default: false
+  },
+  swapClass: {
+    type: String
   }
 };
 
@@ -220,7 +230,9 @@ const draggableComponent = {
     const options = Object.assign({}, this.options, attributes, optionsAdded, {
       onMove: (evt, originalEvent) => {
         return this.onDragMove(evt, originalEvent);
-      }
+      },
+      swap: this.swap,
+      swapClass: this.swapClass
     });
     !("draggable" in options) && (options.draggable = ">*");
     this._sortable = new Sortable(this.rootContainer, options);
@@ -355,6 +367,12 @@ const draggableComponent = {
       this.alterList(updatePosition);
     },
 
+    swapPosition(oldIndex, newIndex) {
+      const swapPosition = list =>
+        (list[oldIndex] = list.splice(newIndex, 1, list[oldIndex])[0]);
+      this.alterList(swapPosition);
+    },
+
     getRelatedContextFromMoveEvent({ to, related }) {
       const component = this.getUnderlyingPotencialDraggableComponent(to);
       if (!component) {
@@ -397,41 +415,105 @@ const draggableComponent = {
       evt.item._underlying_vm_ = this.clone(this.context.element);
       draggingElement = evt.item;
     },
+    
+    onDragAddSwap(evt) {
+      const swapContext = this.getUnderlyingVm(evt.swapItem);
+      evt.swapItem._underlying_vm_ = this.clone(swapContext.element);
+
+      insertNodeAt(evt.to, evt.swapItem, evt.newIndex);
+      insertNodeAt(evt.from, evt.item, evt.oldIndex);
+
+      const newIndex = this.getVmIndex(evt.newIndex);
+      const element = evt.item._underlying_vm_;
+      this.spliceList(newIndex, 1, element);
+      this.computeIndexes();
+    },
 
     onDragAdd(evt) {
       const element = evt.item._underlying_vm_;
       if (element === undefined) {
         return;
       }
-      removeNode(evt.item);
-      const newIndex = this.getVmIndex(evt.newIndex);
-      this.spliceList(newIndex, 0, element);
-      this.computeIndexes();
-      const added = { element, newIndex };
-      this.emitChanges({ added });
+      if (this.swap) {
+        this.onDragAddSwap(evt);
+      } else {
+        removeNode(evt.item);
+        const newIndex = this.getVmIndex(evt.newIndex);
+        this.spliceList(newIndex, 0, element);
+        this.computeIndexes();
+        const added = { element, newIndex };
+        this.emitChanges({ added });
+      }
+    },
+    
+    onDragRemoveSwap(evt) {
+      const { oldIndex, newIndex, from, to } = evt;
+      const swapElement = evt.swapItem._underlying_vm_;
+      if (evt.pullMode === "clone") {
+        removeNode(evt.clone);
+      } else {
+        this.spliceList(oldIndex, 1);
+      }
+      this.spliceList(oldIndex, 0, swapElement);
+      const swapped = {
+        element: this.context.element,
+        swapElement,
+        fromIndex: oldIndex,
+        toIndex: newIndex,
+        to,
+        from
+      };
+      this.resetTransitionData(oldIndex);
+      this.emitChanges({ swapped });
     },
 
     onDragRemove(evt) {
-      insertNodeAt(this.rootContainer, evt.item, evt.oldIndex);
-      if (evt.pullMode === "clone") {
-        removeNode(evt.clone);
-        return;
+      if (this.swap) {
+        this.onDragRemoveSwap(evt);
+      } else {
+        insertNodeAt(this.rootContainer, evt.item, evt.oldIndex);
+        if (evt.pullMode === "clone") {
+          removeNode(evt.clone);
+          return;
+        }
+        const oldIndex = this.context.index;
+        this.spliceList(oldIndex, 1);
+        const removed = { element: this.context.element, oldIndex };
+        this.resetTransitionData(oldIndex);
+        this.emitChanges({ removed });
       }
-      const oldIndex = this.context.index;
-      this.spliceList(oldIndex, 1);
-      const removed = { element: this.context.element, oldIndex };
-      this.resetTransitionData(oldIndex);
-      this.emitChanges({ removed });
+    },
+
+    onDragUpdateSwap(evt) {
+      const { oldIndex, newIndex, from, to } = evt;
+      const swapContext = this.getUnderlyingVm(evt.swapItem);
+      const swapElement = this.clone(swapContext.element);
+      from.replaceChild(evt.swapItem, evt.item);
+      insertNodeAt(from, evt.item, oldIndex);
+      this.swapPosition(oldIndex, newIndex);
+      const swapped = {
+        element: this.context.element,
+        swapElement,
+        fromIndex: oldIndex,
+        toIndex: newIndex,
+        to,
+        from
+      };
+      this.emitChanges({ swapped });
     },
 
     onDragUpdate(evt) {
-      removeNode(evt.item);
-      insertNodeAt(evt.from, evt.item, evt.oldIndex);
-      const oldIndex = this.context.index;
-      const newIndex = this.getVmIndex(evt.newIndex);
-      this.updatePosition(oldIndex, newIndex);
-      const moved = { element: this.context.element, oldIndex, newIndex };
-      this.emitChanges({ moved });
+      if (this.swap) {
+        this.onDragUpdateSwap(evt);
+      } else {
+        removeNode(evt.item);
+        insertNodeAt(evt.from, evt.item, evt.oldIndex);
+        const oldIndex = this.context.index;
+        const newIndex = this.getVmIndex(evt.newIndex);
+        this.updatePosition(oldIndex, newIndex);
+        const moved = { element: this.context.element, oldIndex, newIndex };
+        this.emitChanges({ moved });
+      }
     },
 
     updateProperty(evt, propertyName) {
